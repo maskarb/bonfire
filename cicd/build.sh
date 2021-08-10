@@ -4,6 +4,8 @@
 #IMAGE="quay.io/myorg/myapp" -- docker image URI to push to
 #DOCKERFILE=Dockerfile.custom  -- dockerfile to use (optional)
 #CACHE_FROM_LATEST_IMAGE=true  -- build image from cache from latest image (optional)
+#DOCKER_TARGET=target  -- target in multi-stage dockerfile (optional)
+#DOCKER_BUILD_ARGS="arg1=val1 arg2=val2"  -- build arguments to pass to docker/podman (optional)
 
 # Env vars set by bootstrap.sh:
 #IMAGE_TAG="abcd123" -- image tag to push to
@@ -36,6 +38,20 @@ if [ ! -f "$APP_ROOT/$DOCKERFILE" ]; then
 fi
 echo "LABEL quay.expires-after=3d" >> $APP_ROOT/$DOCKERFILE  # tag expires in 3 days
 
+function transform_arg {
+    # transform components to "$1" options for bonfire
+    options=""
+    option="$1"; shift;
+    components="$@"
+    for c in $components; do
+        options="$options $option $c"
+    done
+    echo "$options"
+}
+
+if [ ! -z "$DOCKER_BUILD_ARGS" ]; then
+    export BUILD_ARGS=$(transform_arg --build-arg $DOCKER_BUILD_ARGS)
+fi
 
 if test -f /etc/redhat-release && grep -q -i "release 7" /etc/redhat-release; then
     # on RHEL7, use docker
@@ -53,7 +69,7 @@ if test -f /etc/redhat-release && grep -q -i "release 7" /etc/redhat-release; th
             docker --config="$DOCKER_CONF" build -t "${IMAGE}:${IMAGE_TAG}" $APP_ROOT -f $APP_ROOT/$DOCKERFILE
         }
     else
-        docker --config="$DOCKER_CONF" build -t "${IMAGE}:${IMAGE_TAG}" $APP_ROOT -f $APP_ROOT/$DOCKERFILE
+        docker --config="$DOCKER_CONF" build -t "${IMAGE}:${IMAGE_TAG}" $APP_ROOT -f $APP_ROOT/$DOCKERFILE --target=${DOCKER_TARGET} ${BUILD_ARGS}
     fi
     docker --config="$DOCKER_CONF" push "${IMAGE}:${IMAGE_TAG}"
 else
@@ -63,6 +79,6 @@ else
     export REGISTRY_AUTH_FILE="$AUTH_CONF_DIR/auth.json"
     podman login -u="$QUAY_USER" -p="$QUAY_TOKEN" quay.io
     podman login -u="$RH_REGISTRY_USER" -p="$RH_REGISTRY_TOKEN" registry.redhat.io
-    podman build -f $APP_ROOT/$DOCKERFILE -t "${IMAGE}:${IMAGE_TAG}" $APP_ROOT
+    podman build -f $APP_ROOT/$DOCKERFILE -t "${IMAGE}:${IMAGE_TAG}" $APP_ROOT --target=${DOCKER_TARGET} ${BUILD_ARGS}
     podman push "${IMAGE}:${IMAGE_TAG}"
 fi
